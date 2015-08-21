@@ -11,30 +11,19 @@ import numpy as np
 import unittest
 
 
-# Internal information (do not read if you just want to use this):
-#
-# Class TriesA5 stores all data and methods
-# necessary for constructing a tree for A5 algorithm
-# Each leaf represents some string s obtained
-# by traversing the tree from root to the leaf.
-# In each leaf we store covering lables of
-# tokens in the string s on the path the root -> the_leaf.
-#
-# information about nodes is stored in a dictionary self.nodes
-# self.nodes[nodeId] returns an list, say, the_node which
-# stores infromation about a node, indices below
-# which starts from NODE_ are indices in list the_node
-#
-# information about edges is stored in a dictionary self.edges
-# key is souce node id and value is a dictionary, say, edge_group
-# key of edge_group is first token and value is a list which contains
-# source node id, destination node id, and tokens.
-# So an edge is retreived by its souce node id and first token:
-# e = self.edges[source_node_id][first_token]
-
-
 
 class TextAttribution(json_plus.Serializable):
+    """Usage (see also unit tests at the end):
+    a = TextAttribution.new_text_attribution_processor(N=4)
+    a.add_revision(list_of_tokens1, revision_info="rev0")
+    a.add_revision(list_of_tokens1, revision_info="rev0")
+    a.add_revision(list_of_tokens1, revision_info="rev0")
+    print a.get_attribution()
+    s = a.to_json()
+    b = json_plus.Serializable.from_json(s)
+    print b.get_attribution()
+    """
+
     def __init__(self):
         """The initializer is empty, as required by json_plus."""
         pass
@@ -124,7 +113,7 @@ class TextAttribution(json_plus.Serializable):
           on a token is that it be json_serializable.
         * The timestamp is used to decide when to prune information for
           text that has long been dead, so use it (see parameters
-          K_time and will_truncate).
+          K_time and will_truncate).  Defaults to current time.
         * revision_info is an arbitrary json-serializable piece of information about
           the revision.  It can consist of the revision id, or in the json dump of a
           dictionary containing e.g. revision id, revision author, revision timestamp,
@@ -138,7 +127,7 @@ class TextAttribution(json_plus.Serializable):
         #self.last_inserted_revision_id = wiki_revision_id
         self.last_inserted_revision_id = self.cr_number
         # saving previous timestamp
-        self.cr_timestamp = timestamp
+        self.cr_timestamp = timestamp or datetime.datetime.utcnow()
         self._update_timetable(timestamp)
         self._update_revision_id_table()
         # calculating covering and adding nodes to the tree if needed
@@ -152,7 +141,7 @@ class TextAttribution(json_plus.Serializable):
             th = self._get_threshold()
             self._truncate(th)
 
-    def get_covering(self):
+    def get_attribution(self):
         """This function can be called after add_revision, and it is used to
         read the origin of every token in the last revision.
         It returns a list of information, one for each token of the last revision.
@@ -162,7 +151,7 @@ class TextAttribution(json_plus.Serializable):
         idxs = self.cr_covering[self.N : -self.N]
         return [self.revision_info[x] for x in idxs]
 
-    def get_covering_abbrev(self):
+    def get_attribution_abbrev(self):
         """Similar to the above function, but returns:
         - a list of ids, one per token.
         - a mapping from ids to revision_info.
@@ -596,6 +585,28 @@ def plot_attribution_tree(nodes, edges, revisions, file_name):
     print temp
     os.system(temp)
 
+# Internal information (do not read if you just want to use this):
+#
+# Class TriesA5 stores all data and methods
+# necessary for constructing a tree for A5 algorithm
+# Each leaf represents some string s obtained
+# by traversing the tree from root to the leaf.
+# In each leaf we store covering lables of
+# tokens in the string s on the path the root -> the_leaf.
+#
+# information about nodes is stored in a dictionary self.nodes
+# self.nodes[nodeId] returns an list, say, the_node which
+# stores infromation about a node, indices below
+# which starts from NODE_ are indices in list the_node
+#
+# information about edges is stored in a dictionary self.edges
+# key is souce node id and value is a dictionary, say, edge_group
+# key of edge_group is first token and value is a list which contains
+# source node id, destination node id, and tokens.
+# So an edge is retreived by its souce node id and first token:
+# e = self.edges[source_node_id][first_token]
+
+
 class TestTextAttribution(unittest.TestCase):
 
     def test_one_revision(self):
@@ -603,8 +614,8 @@ class TestTextAttribution(unittest.TestCase):
         trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         trie.add_revision('I like cats and dogs'.split(), revision_info=0)
-        print "One:", trie.get_covering()
-        self.assertEqual(trie.get_covering(), [0, 0, 0, 0, 0])
+        print "One:", trie.get_attribution()
+        self.assertEqual(trie.get_attribution(), [0, 0, 0, 0, 0])
 
     def test_two_revisions(self):
         trie = TextAttribution()
@@ -613,7 +624,7 @@ class TestTextAttribution(unittest.TestCase):
         now1 = datetime.datetime(year=2015, month=8, day=26)
         trie.add_revision('I like cats and dogs'.split(), revision_info=0)
         trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info=1)
-        print "Two", trie.get_covering()
+        print "Two", trie.get_attribution()
         # self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
 
     def test_three_revisions(self):
@@ -624,13 +635,23 @@ class TestTextAttribution(unittest.TestCase):
         trie.add_revision('I like cats and dogs'.split(), revision_info='luca')
         trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info='matt')
         trie.add_revision('I like cats and elephants but even more birds'.split(), revision_info='george')
-        print "Three:", trie.get_covering()
-        self.assertEqual(trie.get_covering(), ['luca', 'luca', 'luca', 'luca',
+        print "Three:", trie.get_attribution()
+        self.assertEqual(trie.get_attribution(), ['luca', 'luca', 'luca', 'luca',
                                                 'george', 'matt', 'matt', 'matt', 'matt'])
-        print trie.get_covering_abbrev()
-        idxs, info = trie.get_covering_abbrev()
-        self.assertEqual(trie.get_covering(), [info[x] for x in idxs])
+        print trie.get_attribution_abbrev()
+        idxs, info = trie.get_attribution_abbrev()
+        self.assertEqual(trie.get_attribution(), [info[x] for x in idxs])
 
+    def test_serialization_simple(self):
+        a = TextAttribution.new_text_attribution_processor(N=4)
+        a.add_revision('I like pasta al pomodoro'.split(), revision_info="rev0")
+        a.add_revision("I don't like pasta al pomodoro".split(), revision_info="rev1")
+        a.add_revision("I like risotto a lot more than pasta al pomodoro".split(), revision_info="rev2")
+        print a.get_attribution()
+        s = a.to_json()
+        b = json_plus.Serializable.from_json(s)
+        print b.get_attribution()
+        self.assertEqual(a.get_attribution(), b.get_attribution())
 
 
 if __name__ == '__main__':
