@@ -12,6 +12,20 @@ Precisely, the algorithm takes a parameter N.
 If a sequence of tokens of length equal or greater than N has appeared before, it
 is attributed to its earliest occurrence.  See the paper for details.
 
+The code works by building a trie-based representation of the whole history of the
+revisions, in an object of the class TextAttribution.
+Each time a new revision is passed to the object, the object updates its internal state
+and it computes the earliest attribution of the new revision, which can be then easily obtained.
+The object itself can be serialized (and de-serialized) using json-based methods.
+
+To avoid the representation of the whole past history from growing too much, we remove
+from the object the information about content that has been absent from revisions
+(a) for at least 90 days, and (b) for at least 100 revisions.  These are
+configurable parameters.  With these choices, for the Wikipedia,
+the serialization of the object has size typically between 10 and 20 times the size of a
+typical revision, even for pages with very long revision lists.  See paper for detailed
+experimental results.
+
 ## How to use
 
 ```python
