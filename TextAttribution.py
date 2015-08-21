@@ -33,13 +33,17 @@ import unittest
 # e = self.edges[source_node_id][first_token]
 
 
+
 class TextAttribution(json_plus.Serializable):
     def __init__(self):
         """The initializer is empty, as required by json_plus."""
         pass
 
-    def initialize(self, N=4, K_revisions=100, K_time=None, will_truncate=True):
-        """Initializes the text attribution processing.
+    def initialize(self, N=4, K_revisions=100, K_time=None, will_truncate=True,
+                   dummy_token=None):
+        """Initializes the text attribution processing.  Call ONCE after
+        instantiating a new object, or just use the create_text_attribution_processor
+        method.
         * The parameter N is such that every repetition of at least N input tokens is rare,
           and is likely to denote copying rather than original content.  That is, if a
           subsequent author adds some content that contains N or more consecutive tokens from a
@@ -48,11 +52,14 @@ class TextAttribution(json_plus.Serializable):
         * The trie guarantees tracking of at least K_revisions for K_time (default: 90 days).
         * If will_truncate is True, the trie will truncate content that is dead (not in the
           latest revision), and both older than K_revisions and K_time.
+        * dummy_token is a token that is guaranteed not to occur in any actual revision.
+          The default value of None is a good one.
         """
         self.N = N
         self.K_revisions = K_revisions
         self.K_time = K_time or datetime.timedelta(days=90)
         self.will_truncate = will_truncate
+        self.dummy_token = dummy_token
 
         # initialization class constants
         # last revision when a node was visited
@@ -92,8 +99,8 @@ class TextAttribution(json_plus.Serializable):
         self.cr_covering = []
         # crevision is current revision - list of tokens
         self.crevision = []
-        # inserting root
-        self.add_node()
+        # inserting root node.
+        self._add_node()
         # rev_incremental_number is a revision index number
         # e.g. first added revision has rev_incremental_number one,
         #      second added revision has rev_incremental_number two,
@@ -103,6 +110,18 @@ class TextAttribution(json_plus.Serializable):
         # the table have similar role as timetable
         self.revision_id_table = []
 
+    @staticmethod
+    def new_text_attribution_processor(N=4, K_revisions=100, K_time=None,
+                                       will_truncate=True, dummy_token=None):
+        """Convenience function for creating a text attribution object.
+        Just do:
+        attributor = TextAttribution.create_text_attribution_processor(N=4)
+        (for example).
+        """
+        a = TextAttribution()
+        a.initialize(N=N, K_revisions=K_revisions, K_time=K_time,
+                     will_truncate=will_truncate, dummy_token=dummy_token)
+        return a
 
     def add_revision(self, revision, timestamp=None,
                      user_id=None, user_name=None, wiki_revision_id=None):
@@ -125,7 +144,7 @@ class TextAttribution(json_plus.Serializable):
         # user_name is ip adress if the user is anonymous
         self.user_id = user_id
         self.user_name = user_name
-        self.crevision = revision
+        self.crevision = [self.dummy_token] * self.N + revision + [self.dummy_token] * self.N
         if wiki_revision_id != None:
             self.cr_number = wiki_revision_id
         else:
@@ -144,46 +163,44 @@ class TextAttribution(json_plus.Serializable):
         #if (self.pr_timestamp != None and self.cr_timestamp != None
         #    and (int(self.cr_timestamp) < int(self.pr_timestamp))):
         #    raise Exception('newer revision has already been added')
-        self.update_timetable(timestamp)
-        self.update_revision_id_table()
+        self._update_timetable(timestamp)
+        self._update_revision_id_table()
         # calculating covering and adding nodes to the tree if needed
         # list_of_leaves_id is a list such that i-th element of it
         # is a node id of a leaf with string label self.crevision[i : i + N]
-        list_of_leaves_id = self.calculate_covering_and_add_branches()
+        list_of_leaves_id = self._calculate_covering_and_add_branches()
         # update covering labels
-        self.update_covering_labels(list_of_leaves_id)
+        self._update_covering_labels(list_of_leaves_id)
         # truncating the tree
         if self.will_truncate:
-            th = self.get_threshold()
-            self.truncate(th)
+            th = self._get_threshold()
+            self._truncate(th)
 
-    def add_dummy_tokens(self, revision):
-        """ method adds N dummy tokens to the beginning and to the end
-        of the revision
+    def get_covering(self):
+        """ precondition is self.cr_covering is
+        a covering of current revision
         """
-        dummy = ["dummy"] * self.N
-        result = []
-        result.extend(dummy)
-        result.extend(revision)
-        result.extend(dummy)
-        return result
+        return self.cr_covering[self.N : -self.N]
 
-    def add_node(self):
+
+    ### Internal methods below this point.
+
+    def _add_node(self):
         """ method adds node to array self.nodes
         returns an id of a new node
         """
-        new_node_id = self.get_new_node_id()
+        new_node_id = self._get_new_node_id()
         new_node = []
         # setting node last visit to current revision
         new_node.append(self.cr_number)
         self.nodes[new_node_id] = new_node
         return new_node_id
 
-    def get_node(self, node_id):
+    def _get_node(self, node_id):
         self.nodes[node_id][self.NODE_LAST_VISIT] = self.cr_number
         return self.nodes[node_id]
 
-    def get_leaf_covering_label(self, leaf_id):
+    def _get_leaf_covering_label(self, leaf_id):
         """ method returns covering label of
         a node with id leaf_id
         if the label is an integer then we return list of lenght N
@@ -194,7 +211,7 @@ class TextAttribution(json_plus.Serializable):
             labels = [labels] * self.N
         return labels
 
-    def set_covering_label(self, leaf_id, new_label):
+    def _set_covering_label(self, leaf_id, new_label):
         """ method sets covering label for a leaf with id leaf_id,
         new_label can be an integer of a list
         """
@@ -205,7 +222,7 @@ class TextAttribution(json_plus.Serializable):
         node.append(new_label)
         self.nodes[leaf_id] = node
 
-    def add_edge(self, src_node_id, dest_node_id, tokens):
+    def _add_edge(self, src_node_id, dest_node_id, tokens):
         if not self.edges.has_key(src_node_id):
             self.edges[src_node_id] = {}
         new_edge = []
@@ -214,36 +231,36 @@ class TextAttribution(json_plus.Serializable):
         new_edge.append(tokens[:])
         self.edges[src_node_id][tokens[0]] = new_edge
 
-    def get_edge(self, src_node_id, first_token):
+    def _get_edge(self, src_node_id, first_token):
         e = self.edges[src_node_id][first_token]
         # remember last visit
-        self.get_node(src_node_id)
-        self.get_node(e[self.EDGE_DEST_NODE_ID])
+        self._get_node(src_node_id)
+        self._get_node(e[self.EDGE_DEST_NODE_ID])
         return e
 
-    def edge_exist(self, src_node_id, first_token):
+    def _edge_exist(self, src_node_id, first_token):
         """ method returns true if the edge exists in the tree
         """
         return (self.edges.has_key(src_node_id) and
                     self.edges[src_node_id].has_key(first_token))
 
-    def split_edge(self, src_node_id, first_token, split_point):
+    def _split_edge(self, src_node_id, first_token, split_point):
         """ src_node_id and first_token determines the edge to split
         split_point is lenth of tokens in firs part of the edge
         method returns id of a new node that splits old edge
         """
-        e = self.get_edge(src_node_id, first_token)
+        e = self._get_edge(src_node_id, first_token)
         # shrinking the edge
         e_dest_node_id_old = e[self.EDGE_DEST_NODE_ID]
-        middle_node_id = self.add_node()
+        middle_node_id = self._add_node()
         first_part_of_e = e[self.EDGE_TOKENS][:split_point]
         second_part_of_e = e[self.EDGE_TOKENS][split_point:]
-        self.add_edge(src_node_id, middle_node_id, first_part_of_e)
+        self._add_edge(src_node_id, middle_node_id, first_part_of_e)
         # creating 2nd part of the edge
-        self.add_edge(middle_node_id, e_dest_node_id_old, second_part_of_e)
+        self._add_edge(middle_node_id, e_dest_node_id_old, second_part_of_e)
         return middle_node_id
 
-    def calculate_covering_and_add_branches(self):
+    def _calculate_covering_and_add_branches(self):
         """ method calculates covering for current
         revision (sets property self.cr_covering)
         and adds new branches to the tree
@@ -269,9 +286,9 @@ class TextAttribution(json_plus.Serializable):
         # filling matrix_labels
         for i in xrange(len(self.crevision) - self.N + 1):
             s = self.crevision[i: i + self.N]
-            leaf_id = self.get_leaf_nodeid_or_add_it(s)
+            leaf_id = self._get_leaf_nodeid_or_add_it(s)
             list_of_leaves_id.append(leaf_id)
-            matrix_labels[i] = self.get_leaf_covering_label(leaf_id)
+            matrix_labels[i] = self._get_leaf_covering_label(leaf_id)
         # calculating covering
         covering = []
         # take care of first N-1 tokens
@@ -289,7 +306,7 @@ class TextAttribution(json_plus.Serializable):
         self.cr_covering = covering
         return list_of_leaves_id
 
-    def get_leaf_nodeid_or_add_it(self, s):
+    def _get_leaf_nodeid_or_add_it(self, s):
         """ given string s (list of tokens) of length N
         the method returns leaf id that string path
         the root -> the leaf equals s
@@ -313,14 +330,14 @@ class TextAttribution(json_plus.Serializable):
             # to traverse down the tree
             # doesn not exist then we create
             # new edge and return new leaf id
-            if not self.edge_exist(current_node_id, rev_tokens[0]):
-                new_node_id = self.add_node()
-                self.add_edge(current_node_id, new_node_id, rev_tokens)
+            if not self._edge_exist(current_node_id, rev_tokens[0]):
+                new_node_id = self._add_node()
+                self._add_edge(current_node_id, new_node_id, rev_tokens)
                 # adding covering label to the new created leaf
-                self.set_covering_label(new_node_id, self.cr_number)
+                self._set_covering_label(new_node_id, self.cr_number)
                 return new_node_id
             # we can traverse down
-            e = self.get_edge(current_node_id, rev_tokens[0])
+            e = self._get_edge(current_node_id, rev_tokens[0])
             e_tokens = e[self.EDGE_TOKENS]
             # now compare tokens from the edge (e_tokens)
             # and rev_tokens (the rest of string that we need to add
@@ -341,19 +358,19 @@ class TextAttribution(json_plus.Serializable):
 
             # now we need create new edge because
             # prefix_len is less than lenght of the edge
-            middle_node_id = self.split_edge(current_node_id,
+            middle_node_id = self._split_edge(current_node_id,
                                              rev_tokens[0],
                                              prefix_len)
             # creating new edge with rev_tokens
-            new_node_id = self.add_node()
-            self.add_edge(middle_node_id,
+            new_node_id = self._add_node()
+            self._add_edge(middle_node_id,
                           new_node_id,
                           rev_tokens[prefix_len:])
             # adding covering label to the new created leaf
-            self.set_covering_label(new_node_id, self.cr_number)
+            self._set_covering_label(new_node_id, self.cr_number)
             return new_node_id
 
-    def update_covering_labels(self, list_of_leaves_id):
+    def _update_covering_labels(self, list_of_leaves_id):
         """  method updates all covering labels in the tree
         given covering for current revision (property self.cr_covering)
         and list_of_leaves_id (resul of calculate_covering_and_add_branches)
@@ -366,9 +383,9 @@ class TextAttribution(json_plus.Serializable):
             if min(labels) == max(labels):
                 labels = labels[0]
             # setting covering label
-            self.set_covering_label(leaf_id, labels)
+            self._set_covering_label(leaf_id, labels)
 
-    def update_revision_id_table(self):
+    def _update_revision_id_table(self):
         """ revision id timetable is needed for
         truncating nodes of the tree.
         timetable is a list of tuples
@@ -406,7 +423,7 @@ class TextAttribution(json_plus.Serializable):
             else:
                 break
 
-    def update_timetable(self, timestamp=None):
+    def _update_timetable(self, timestamp=None):
         """ time table is needed for
         truncating nodes of the tree.
         timetable is a list of tuples
@@ -437,7 +454,7 @@ class TextAttribution(json_plus.Serializable):
             else:
                 break
 
-    def get_threshold(self):
+    def _get_threshold(self):
         """ method calculates threshold for truncating the tree.
 
         note that revision_id_table stores maximum between K_rev revisions and
@@ -446,7 +463,7 @@ class TextAttribution(json_plus.Serializable):
         """
         return self.revision_id_table[0][1]
 
-    def truncate(self, threshold):
+    def _truncate(self, threshold):
         """ the function delete nodes and edges.
         all nodes have revision id when they were visited last time.
         nodes and edges which were visited last time
@@ -494,7 +511,7 @@ class TextAttribution(json_plus.Serializable):
         for x in id_to_del:
             del self.nodes[x]
 
-    def get_new_node_id(self):
+    def _get_new_node_id(self):
         self.lin_id += 1
         return self.lin_id
 
@@ -511,83 +528,6 @@ class TextAttribution(json_plus.Serializable):
 
     def is_leaf(self, node_id):
         return node_id not in self.edges
-
-    def dump2json(self):
-        """ method returns json string which stores the tree and
-        extra info (last_inserted_revision_id)
-        format of the string is next:
-        "[last_inserted_revision_id, json_representing_the_tree]"
-        """
-        tree_dict = self.get_tree_as_dict()
-        res = [self.last_inserted_revision_id, tree_dict]
-        return json.dumps(res)
-
-    def get_tree_as_dict(self):
-        """ method returns dictionary which represents the tree and
-        contains some class values
-        json representation of the tree dictionary is next
-        nodeid -> [last visit, [tokens, XXX] ]
-        where XXX is destination node id if edge
-        with tokens leads to non leaf node
-        or XXX is [last visit, labels of tokens]
-        where labels of tokens is tuple (l_1, ..., l_N)
-        labels of tokens on the path root->the leaf,
-        if l_1=...=l_N=l then instead of tuple store only number l
-        """
-        # convering x to str(x) because
-        # fast module cjson for serialization
-        # accepts only keys of type string
-        res = {}
-        for x in self.nodes:
-            if not self.is_leaf(x):
-                l = [self.nodes[x][self.NODE_LAST_VISIT]]
-                res[str(x)] = l
-        for x in self.edges:
-            for y in self.edges[x]:
-                e = self.edges[x][y]
-                res[str(x)].append(' '.join(e[self.EDGE_TOKENS]))
-                # Test if edge leads to leaf.
-                dest = e[self.EDGE_DEST_NODE_ID]
-                if self.is_leaf(dest):
-                    n_dest = self.nodes[dest]
-                    res[str(x)].append(n_dest[self.NODE_LAST_VISIT])
-                    res[str(x)].append(n_dest[self.NODE_COVERING_LABEL])
-                else:
-                    res[str(x)].append(dest)
-        # adding another values like N, K_rev, K_time, current timestamp
-        class_values = {}
-        class_values['N'] = self.N
-        class_values['K_revisions'] = self.K_revisions
-        class_values['K_time'] = self.K_time
-        class_values['cr_timestamp'] = self.cr_timestamp
-        class_values['lin_id'] = self.lin_id
-        class_values['rev_incremental_number'] = self.rev_incremental_number
-        res['class_values'] = class_values
-        # addin timetable and revision_id_table
-        res['timetable'] = self.timetable
-        res['revision_id_table'] = self.revision_id_table
-        return res
-
-    def get_tree_json(self, json_string):
-        """method returns json which represents the tree
-        """
-        idx = json_string.find('{')
-        return json_string[idx : -1]
-
-    @staticmethod
-    def get_last_revision_id(json_string):
-        """ method returns last inserted revision id given json
-        which  stores information about the ojbect TriesA5
-        """
-        idx = json_string.find(',')
-        return int(json_string[1 : idx])
-
-
-    def dump_covering2json(self):
-        """ precondition is self.cr_covering is
-        a covering of current revision
-        """
-        return json.dumps(self.cr_covering[self.N : -self.N])
 
 
 def plot_TriesA5(nodes, edges, revisions, file_name):
@@ -670,8 +610,8 @@ class TestTextAttribution(unittest.TestCase):
         trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
-        print "One:", trie.cr_covering
-        self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
+        print "One:", trie.get_covering()
+        self.assertEqual(trie.get_covering(), [0, 0, 0, 0, 0])
 
     def test_two_revisions(self):
         trie = TextAttribution()
@@ -680,20 +620,19 @@ class TestTextAttribution(unittest.TestCase):
         now1 = datetime.datetime(year=2015, month=8, day=26)
         trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
         trie.add_revision('I like cats and dogs but even more birds'.split(), user_id=1, timestamp=now1, user_name='luca')
-        print "Two", trie.cr_covering
+        print "Two", trie.get_covering()
         # self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
 
     def test_three_revisions(self):
-        trie = TextAttribution()
-        trie.initialize(N=4)
+        trie = TextAttribution.new_text_attribution_processor(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         now1 = datetime.datetime(year=2015, month=8, day=26)
         now2 = datetime.datetime(year=2015, month=8, day=26)
         trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
         trie.add_revision('I like cats and dogs but even more birds'.split(), user_id=1, timestamp=now1, user_name='luca')
         trie.add_revision('I like cats and elephants but even more birds'.split(), user_id=1, timestamp=now2, user_name='luca')
-        print "Three:", trie.cr_covering
-        self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 2, 1, 1, 1, 1])
+        print "Three:", trie.get_covering()
+        self.assertEqual(trie.get_covering(), [0, 0, 0, 0, 2, 1, 1, 1, 1])
 
 
 
