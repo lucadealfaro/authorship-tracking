@@ -118,9 +118,12 @@ class TextAttribution(json_plus.Serializable):
           the revision.  It can consist of the revision id, or in the json dump of a
           dictionary containing e.g. revision id, revision author, revision timestamp,
           and more.  This information will be returned as attribution for the text.
+          It defaults to the ordinal number of the revision.
         """
-        self.crevision = [self.dummy_token] * self.N + revision + [self.dummy_token] * self.N
+        self.crevision = [self.dummy_token] * self.N + revision[:] + [self.dummy_token] * self.N
         self.cr_number += 1
+        if revision_info is None:
+            revision_info = str(self.cr_number)
         self.revision_info.append(revision_info)
         # last inserted revision id
         # todo(michael): next line changed in a hurry
@@ -619,47 +622,43 @@ def plot_attribution_tree(nodes, edges, revisions, file_name):
 
 class TestTextAttribution(unittest.TestCase):
 
-    @unittest.skip('later')
     def test_one_revision(self):
         trie = TextAttribution()
         trie.initialize(N=4)
         trie.add_revision('I like cats and dogs'.split(), revision_info=0)
-        print "One:", trie.get_attribution()
+        # print "One:", trie.get_attribution()
         self.assertEqual(trie.get_attribution(), [0, 0, 0, 0, 0])
 
-    @unittest.skip('later')
     def test_two_revisions(self):
         trie = TextAttribution()
         trie.initialize(N=4)
         trie.add_revision('I like cats and dogs'.split(), revision_info=0)
         trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info=1)
-        print "Two", trie.get_attribution()
+        # print "Two", trie.get_attribution()
         # self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
 
-    @unittest.skip('later')
     def test_three_revisions(self):
         trie = TextAttribution.new_text_attribution_processor(N=4)
         trie.add_revision('I like cats and dogs'.split(), revision_info='luca')
         trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info='matt')
         trie.add_revision('I like cats and elephants but even more birds'.split(), revision_info='george')
-        print "Three:", trie.get_attribution()
+        # print "Three:", trie.get_attribution()
         self.assertEqual(trie.get_attribution(), ['luca', 'luca', 'luca', 'luca',
                                                 'george', 'matt', 'matt', 'matt', 'matt'])
-        print trie.get_attribution_abbrev()
+        # print trie.get_attribution_abbrev()
         idxs, info = trie.get_attribution_abbrev()
         self.assertEqual(trie.get_attribution(), [info[x] for x in idxs])
 
-    @unittest.skip('later')
     def test_serialization_simple(self):
         a = TextAttribution.new_text_attribution_processor(N=4)
         a.add_revision('I like pasta al pomodoro'.split(), revision_info="rev0")
         a.add_revision("I don't like pasta al pomodoro".split(), revision_info="rev1")
         a.add_revision("I like risotto a lot more than pasta al pomodoro".split(), revision_info="rev2")
-        print a.get_attribution()
+        # print a.get_attribution()
         s = a.to_json()
-        print s
+        # print s
         b = TextAttribution.from_json(s)
-        print b.get_attribution()
+        # print b.get_attribution()
         self.assertEqual(a.get_attribution(), b.get_attribution())
 
     def check_equal_edges(self, a, b):
@@ -674,17 +673,16 @@ class TestTextAttribution(unittest.TestCase):
                 self.assertEqual(a.edges[k][kk], b.edges[k][kk])
         print "--end check--"
 
-    @unittest.skip('later')
     def test_serialization_two_steps(self):
         a = TextAttribution.new_text_attribution_processor(N=4)
         a.add_revision(u'I like pasta al pomodoro'.split(), revision_info="rev0")
         a.add_revision(u"I don't like pasta al pomodoro".split(), revision_info="rev1")
         a.add_revision(u"I like risotto a lot more than pasta al pomodoro".split(), revision_info="rev2")
         b = TextAttribution.from_json(a.to_json())
-        print "Nodes a:", a.nodes
-        print "Nodes b:", b.nodes
-        print "Edges a:", a.edges
-        print "Edges b:", b.edges
+        # print "Nodes a:", a.nodes
+        # print "Nodes b:", b.nodes
+        # print "Edges a:", a.edges
+        # print "Edges b:", b.edges
         self.assertEqual(a.nodes, b.nodes)
         self.assertEqual(a.edges, b.edges)
         # self.check_equal_edges(a, b)
@@ -692,9 +690,37 @@ class TestTextAttribution(unittest.TestCase):
         new_rev = 'I like risotto much better than pasta al pomodoro'.split()
         a.add_revision(new_rev, revision_info="rev3")
         b.add_revision(new_rev, revision_info="rev3")
-        print "a attr:", a.get_attribution()
-        print "b attr:", b.get_attribution()
+        # print "a attr:", a.get_attribution()
+        # print "b attr:", b.get_attribution()
         self.assertEqual(a.get_attribution(), b.get_attribution())
+
+    def make_revision(self, r):
+        import random
+        tokens = ['a', 'bb', 'ccc']
+        def get_tokens(n):
+            return [random.choice(tokens) for _ in range(n)]
+        k = random.randrange(0, len(r))
+        if random.getrandbits(1):
+            # insert
+            l = random.randrange(2, 8)
+            r[k: k + l] = get_tokens(l)
+        else:
+            # replace
+            r[k] = random.choice(tokens)
+        return r
+
+    def test_serialization_manytimes(self):
+        a = TextAttribution.new_text_attribution_processor(N=3)
+        r = ['a']
+        a.add_revision(r)
+        b = TextAttribution.from_json(a.to_json())
+        for _ in range(100):
+            r = self.make_revision(r)
+            a.add_revision(r)
+            b = TextAttribution.from_json(b.to_json())
+            b.add_revision(r)
+            self.assertEqual(a.get_attribution(), b.get_attribution())
+
 
 
 if __name__ == '__main__':
