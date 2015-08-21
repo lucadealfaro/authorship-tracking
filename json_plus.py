@@ -20,11 +20,11 @@ class Serializable(object):
     def __eq__(self, other):
         return self.__dict__ == other.__dict__
 
-    def to_json(self, pack_ndarray=False, tolerant=True):
-        return Serializable.dumps(self, pack_ndarray=pack_ndarray, tolerant=tolerant)
+    def to_json(self, pack_ndarray=True, tolerant=True, indent=None):
+        return Serializable.dumps(self, pack_ndarray=pack_ndarray, tolerant=tolerant, indent=indent)
 
     @staticmethod
-    def dumps(obj, pack_ndarray=False, tolerant=True):
+    def dumps(obj, pack_ndarray=True, tolerant=True, indent=None):
         """This function dumps an object to extended json.
         All objects that are json-serializable data types, and in addition,
         numpy float, bool, or int types are serialized.
@@ -71,7 +71,7 @@ class Serializable(object):
                 return None
             else:
                 raise ValueError("Cannot encode in json object %r" % o)
-        return json.dumps(obj, default=custom, indent=2)
+        return json.dumps(obj, default=custom, indent=indent)
 
     @staticmethod
     def from_json(s, objectify=True, remapper={}, fallback={}):
