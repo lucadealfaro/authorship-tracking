@@ -89,8 +89,6 @@ class TextAttribution(json_plus.Serializable):
         self.timetable = []
         # timestamp format is 'yyyymmddhhmmss'
         self.cr_timestamp = None
-        # previous revision timestamp
-        self.pr_timestamp = None
         # cr_number is current revision number
         self.cr_number = -1
         # cr_covering is covering for current revision, i.e.
@@ -103,11 +101,6 @@ class TextAttribution(json_plus.Serializable):
         self.revision_info = []
         # inserting root node.
         self._add_node()
-        # rev_incremental_number is a revision index number
-        # e.g. first added revision has rev_incremental_number one,
-        #      second added revision has rev_incremental_number two,
-        #      third added revision has rev_incremental_number three, etc
-        self.rev_incremental_number = 0
         # revision_id_table is a mapping wiki revision id <=> index number
         # the table have similar role as timetable
         self.revision_id_table = []
@@ -144,10 +137,7 @@ class TextAttribution(json_plus.Serializable):
         # todo(michael): next line changed in a hurry
         #self.last_inserted_revision_id = wiki_revision_id
         self.last_inserted_revision_id = self.cr_number
-        # revision index number
-        self.rev_incremental_number += 1
         # saving previous timestamp
-        self.pr_timestamp = self.cr_timestamp
         self.cr_timestamp = timestamp
         self._update_timetable(timestamp)
         self._update_revision_id_table()
@@ -163,8 +153,10 @@ class TextAttribution(json_plus.Serializable):
             self._truncate(th)
 
     def get_covering(self):
-        """ precondition is self.cr_covering is
-        a covering of current revision
+        """This function can be called after add_revision, and it is used to
+        read the origin of every token in the last revision.
+        It returns a list of information, one for each token of the last revision.
+        Each piece of information corresponds to the revision_info
         """
         idxs = self.cr_covering[self.N : -self.N]
         return [self.revision_info[x] for x in idxs]
@@ -386,12 +378,12 @@ class TextAttribution(json_plus.Serializable):
         # todo(Michael): make minrev as an argument or constant
         minrev = 5
         if len(self.revision_id_table) == 0:
-            tuple2add = (self.rev_incremental_number, self.cr_number)
+            tuple2add = (self.cr_number, self.cr_number)
             self.revision_id_table.append(tuple2add)
             return
-        revdist = self.rev_incremental_number - self.revision_id_table[-1][0]
+        revdist = self.cr_number - self.revision_id_table[-1][0]
         if revdist >= minrev:
-            tuple2add = (self.rev_incremental_number, self.cr_number)
+            tuple2add = (self.cr_number, self.cr_number)
             self.revision_id_table.append(tuple2add)
         # deleting rule: delete tuple from the table
         # if distance between current revision and tuple is more than
@@ -400,10 +392,10 @@ class TextAttribution(json_plus.Serializable):
             th = 0
         else:
             inc_number_oldest = self.timetable[0][0]
-            th = self.rev_incremental_number - inc_number_oldest
+            th = self.cr_number - inc_number_oldest
         th = max(self.K_revisions, th) + minrev
         while True:
-            revdist = self.rev_incremental_number - self.revision_id_table[0][0]
+            revdist = self.cr_number - self.revision_id_table[0][0]
             if revdist > th:
                 del self.revision_id_table[0]
             else:
@@ -425,11 +417,11 @@ class TextAttribution(json_plus.Serializable):
         # is more or equal than MINDAYS then add new tuple
         # to the time list
         if len(self.timetable) == 0:
-            tuple2add = (self.rev_incremental_number, self.cr_timestamp)
+            tuple2add = (self.cr_number, self.cr_timestamp)
             self.timetable.append(tuple2add)
             return
         if self.cr_timestamp - self.timetable[-1][1] > self.MINDAYS:
-            tuple2add = (self.rev_incremental_number, self.cr_timestamp)
+            tuple2add = (self.cr_number, self.cr_timestamp)
             self.timetable.append(tuple2add)
         # deleting rule: delete tuple from the timetable
         # if distance between current revision and tuple is
@@ -516,11 +508,14 @@ class TextAttribution(json_plus.Serializable):
         return node_id not in self.edges
 
 
-def plot_TriesA5(nodes, edges, revisions, file_name):
-    ''' file_name is a name of a file to save image
+def plot_attribution_tree(nodes, edges, revisions, file_name):
+    """
+    This is just plotting code, and it is not necessary for the
+    functioning of the authorship tracking.
+    file_name is a name of a file to save image
     nonleaf nodes have text: node_id(node last visit)
     leaf nodes have text: [covering label](node last visit)
-    '''
+    """
     NODE_LAST_VISIT = 0;
     NODE_COVERING_LABEL = 1;
     EDGE_SRC_NODE_ID = 0;
@@ -613,7 +608,7 @@ class TestTextAttribution(unittest.TestCase):
         trie = TextAttribution.new_text_attribution_processor(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         now1 = datetime.datetime(year=2015, month=8, day=26)
-        now2 = datetime.datetime(year=2015, month=8, day=26)
+        now2 = datetime.datetime(year=2015, month=8, day=27)
         trie.add_revision('I like cats and dogs'.split(), revision_info='luca')
         trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info='matt')
         trie.add_revision('I like cats and elephants but even more birds'.split(), revision_info='george')
