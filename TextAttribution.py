@@ -99,6 +99,8 @@ class TextAttribution(json_plus.Serializable):
         self.cr_covering = []
         # crevision is current revision - list of tokens
         self.crevision = []
+        # revision_info is information on each revision (e.g., revision id, or author, ...)
+        self.revision_info = []
         # inserting root node.
         self._add_node()
         # rev_incremental_number is a revision index number
@@ -123,32 +125,21 @@ class TextAttribution(json_plus.Serializable):
                      will_truncate=will_truncate, dummy_token=dummy_token)
         return a
 
-    def add_revision(self, revision, timestamp=None,
-                     user_id=None, user_name=None, wiki_revision_id=None):
-        """ methods adds revision r_k (k = 1, 2, 3, ... ) to the tree
-        revision is array of tokens
-        let's denote S a set of all substrings s from r_k of length N
-
-        If k == 1 then in each leaf we store 1 as covering label.
-        If k > 1n then :
-             - obtain covering r_k given tree for
-               revisions r_1, ..., r_{k-1}
-             - add to the tree all subsrings s of r_k of length N
-             - update covering labels for all leaves
-               with path strings from set S
+    def add_revision(self, revision, timestamp=None, revision_info=None):
+        """This method adds a new revision to the analysis.
+        * The revision is an arbitrary list of tokens, where the only requirement
+          on a token is that it be json_serializable.
+        * The timestamp is used to decide when to prune information for
+          text that has long been dead, so use it (see parameters
+          K_time and will_truncate).
+        * revision_info is an arbitrary json-serializable piece of information about
+          the revision.  It can consist of the revision id, or in the json dump of a
+          dictionary containing e.g. revision id, revision author, revision timestamp,
+          and more.  This information will be returned as attribution for the text.
         """
-        # todo(michael): add back dummy tokens
-        #revision = self.add_dummy_tokens(revision)
-
-        # user_id, 0 - if the user is anonymous or nonexistent
-        # user_name is ip adress if the user is anonymous
-        self.user_id = user_id
-        self.user_name = user_name
         self.crevision = [self.dummy_token] * self.N + revision + [self.dummy_token] * self.N
-        if wiki_revision_id != None:
-            self.cr_number = wiki_revision_id
-        else:
-            self.cr_number += 1
+        self.cr_number += 1
+        self.revision_info.append(revision_info)
         # last inserted revision id
         # todo(michael): next line changed in a hurry
         #self.last_inserted_revision_id = wiki_revision_id
@@ -158,11 +149,6 @@ class TextAttribution(json_plus.Serializable):
         # saving previous timestamp
         self.pr_timestamp = self.cr_timestamp
         self.cr_timestamp = timestamp
-        # check that new revision is older that prevision one
-        # todo(michael): do we need it?
-        #if (self.pr_timestamp != None and self.cr_timestamp != None
-        #    and (int(self.cr_timestamp) < int(self.pr_timestamp))):
-        #    raise Exception('newer revision has already been added')
         self._update_timetable(timestamp)
         self._update_revision_id_table()
         # calculating covering and adding nodes to the tree if needed
@@ -180,8 +166,8 @@ class TextAttribution(json_plus.Serializable):
         """ precondition is self.cr_covering is
         a covering of current revision
         """
-        return self.cr_covering[self.N : -self.N]
-
+        idxs = self.cr_covering[self.N : -self.N]
+        return [self.revision_info[x] for x in idxs]
 
     ### Internal methods below this point.
 
@@ -609,7 +595,7 @@ class TestTextAttribution(unittest.TestCase):
         trie = TextAttribution()
         trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
-        trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
+        trie.add_revision('I like cats and dogs'.split(), revision_info=0)
         print "One:", trie.get_covering()
         self.assertEqual(trie.get_covering(), [0, 0, 0, 0, 0])
 
@@ -618,8 +604,8 @@ class TestTextAttribution(unittest.TestCase):
         trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         now1 = datetime.datetime(year=2015, month=8, day=26)
-        trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
-        trie.add_revision('I like cats and dogs but even more birds'.split(), user_id=1, timestamp=now1, user_name='luca')
+        trie.add_revision('I like cats and dogs'.split(), revision_info=0)
+        trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info=1)
         print "Two", trie.get_covering()
         # self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
 
@@ -628,11 +614,12 @@ class TestTextAttribution(unittest.TestCase):
         now0 = datetime.datetime(year=2015, month=8, day=25)
         now1 = datetime.datetime(year=2015, month=8, day=26)
         now2 = datetime.datetime(year=2015, month=8, day=26)
-        trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
-        trie.add_revision('I like cats and dogs but even more birds'.split(), user_id=1, timestamp=now1, user_name='luca')
-        trie.add_revision('I like cats and elephants but even more birds'.split(), user_id=1, timestamp=now2, user_name='luca')
+        trie.add_revision('I like cats and dogs'.split(), revision_info='luca')
+        trie.add_revision('I like cats and dogs but even more birds'.split(), revision_info='matt')
+        trie.add_revision('I like cats and elephants but even more birds'.split(), revision_info='george')
         print "Three:", trie.get_covering()
-        self.assertEqual(trie.get_covering(), [0, 0, 0, 0, 2, 1, 1, 1, 1])
+        self.assertEqual(trie.get_covering(), ['luca', 'luca', 'luca', 'luca',
+                                                'george', 'matt', 'matt', 'matt', 'matt'])
 
 
 
