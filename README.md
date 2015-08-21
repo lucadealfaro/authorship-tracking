@@ -13,7 +13,7 @@ If a sequence of tokens of length equal or greater than N has appeared before, i
 is attributed to its earliest occurrence.  See the paper for details.
 
 The code works by building a trie-based representation of the whole history of the
-revisions, in an object of the class TextAttribution.
+revisions, in an object of the class AuthorshipAttribution.
 Each time a new revision is passed to the object, the object updates its internal state
 and it computes the earliest attribution of the new revision, which can be then easily obtained.
 The object itself can be serialized (and de-serialized) using json-based methods.
@@ -29,9 +29,9 @@ experimental results.
 ## How to use
 
 ```python
-import text_attribution
+import authorship_attribution
 
-a = text_attribution.TextAttribution.new_text_attribution_processor(N=4)
+a = authorship_attribution.AuthorshipAttribution.new_attribution_processor(N=4)
 a.add_revision("I like to eat pasta".split(), revision_info="rev0")
 a.add_revision("I like to eat pasta with tomato sauce".split(), revision_info="rev1")
 a.add_revision("I like to eat rice with tomato sauce".split(), revision_info="rev3")
@@ -49,15 +49,15 @@ attributed, one can read the serialized text attribution object,
 deserialize it, pass it the new revision, re-serialize it and finally write it back:
 
 ```python
-import attribute_revision
+import authorship_attribution
 import os
 
 def attribute_revision_for_page(page_id, revision_id, new_revision, new_revision_time):
     filename = '/path/to/page_%d' % page_id
     if os.path.isfile(filename):
-        a = text_attribution.TextAttribution.from_json(open(filename).read())
+        a = authorship_attribution.AuthorshipAttribution.from_json(open(filename).read())
     else:
-        a = text_attribution.new_text_attribution_processor(N=4)
+        a = authorship_attribution.new_attribution_processor(N=4)
     a.add_revision(new_revision.split(), revision_info=str(revision_id),
                    revision_time=new_revision_time)
     attribution = a.get_attribution()
