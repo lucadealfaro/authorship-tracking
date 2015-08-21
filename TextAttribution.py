@@ -156,10 +156,22 @@ class TextAttribution(json_plus.Serializable):
         """This function can be called after add_revision, and it is used to
         read the origin of every token in the last revision.
         It returns a list of information, one for each token of the last revision.
-        Each piece of information corresponds to the revision_info
+        Each piece of information corresponds to the revision_info of the revision
+        where the token was inserted.
         """
         idxs = self.cr_covering[self.N : -self.N]
         return [self.revision_info[x] for x in idxs]
+
+    def get_covering_abbrev(self):
+        """Similar to the above function, but returns:
+        - a list of ids, one per token.
+        - a mapping from ids to revision_info.
+        The advantage of this function is that, since many tokens commonly
+        originate from the same revisions, if revision_info is large, it
+        produces much smaller output."""
+        idxs = self.cr_covering[self.N : -self.N]
+        infos = {i: self.revision_info[i] for i in idxs}
+        return idxs, infos
 
     ### Internal methods below this point.
 
@@ -615,7 +627,9 @@ class TestTextAttribution(unittest.TestCase):
         print "Three:", trie.get_covering()
         self.assertEqual(trie.get_covering(), ['luca', 'luca', 'luca', 'luca',
                                                 'george', 'matt', 'matt', 'matt', 'matt'])
-
+        print trie.get_covering_abbrev()
+        idxs, info = trie.get_covering_abbrev()
+        self.assertEqual(trie.get_covering(), [info[x] for x in idxs])
 
 
 
