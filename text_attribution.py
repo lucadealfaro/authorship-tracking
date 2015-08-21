@@ -721,6 +721,12 @@ class TestTextAttribution(unittest.TestCase):
             b.add_revision(r)
             self.assertEqual(a.get_attribution(), b.get_attribution())
 
+    def test_doc1(self):
+        a = TextAttribution.new_text_attribution_processor(N=4)
+        a.add_revision("I like to eat pasta".split(), revision_info="rev0")
+        a.add_revision("I like to eat pasta with tomato sauce".split(), revision_info="rev1")
+        a.add_revision("I like to eat rice with tomato sauce".split(), revision_info="rev3")
+        print a.get_attribution()
 
 
 if __name__ == '__main__':
