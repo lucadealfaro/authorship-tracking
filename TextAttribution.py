@@ -10,27 +10,50 @@ import os
 import numpy as np
 import unittest
 
-class TriesA5(object):
-    """ class TriesA5 stores all data and methods
-    necessary for constructing a tree for A5 algorithm
-    Each leaf represents some string s obtained
-    by traversing the tree from root to the leaf.
-    In each leaf we store covering lables of
-    tokens in the string s on the path the root -> the_leaf.
 
-    information about nodes is stored in a dictionary self.nodes
-    self.nodes[nodeId] returns an list, say, the_node which
-    stores infromation about a node, indices below
-    which starts from NODE_ are indices in list the_node
+# Internal information (do not read if you just want to use this):
+#
+# Class TriesA5 stores all data and methods
+# necessary for constructing a tree for A5 algorithm
+# Each leaf represents some string s obtained
+# by traversing the tree from root to the leaf.
+# In each leaf we store covering lables of
+# tokens in the string s on the path the root -> the_leaf.
+#
+# information about nodes is stored in a dictionary self.nodes
+# self.nodes[nodeId] returns an list, say, the_node which
+# stores infromation about a node, indices below
+# which starts from NODE_ are indices in list the_node
+#
+# information about edges is stored in a dictionary self.edges
+# key is souce node id and value is a dictionary, say, edge_group
+# key of edge_group is first token and value is a list which contains
+# source node id, destination node id, and tokens.
+# So an edge is retreived by its souce node id and first token:
+# e = self.edges[source_node_id][first_token]
 
-    information about edges is stored in a dictionary self.edges
-    key is souce node id and value is a dictionary, say, edge_group
-    key of edge_group is first token and value is a list which contains
-    source node id, destination node id, and tokens.
-    So an edge is retreived by its souce node id and first token:
-    e = self.edges[source_node_id][first_token]
-    """
-    def __init__(self, N=4, K_rev=100, K_time=None, will_truncate=True):
+
+class TextAttribution(json_plus.Serializable):
+    def __init__(self):
+        """The initializer is empty, as required by json_plus."""
+        pass
+
+    def initialize(self, N=4, K_revisions=100, K_time=None, will_truncate=True):
+        """Initializes the text attribution processing.
+        * The parameter N is such that every repetition of at least N input tokens is rare,
+          and is likely to denote copying rather than original content.  That is, if a
+          subsequent author adds some content that contains N or more consecutive tokens from a
+          previously existing revision, the tokens are attributed to the previously
+          existing revision, not to the author.
+        * The trie guarantees tracking of at least K_revisions for K_time (default: 90 days).
+        * If will_truncate is True, the trie will truncate content that is dead (not in the
+          latest revision), and both older than K_revisions and K_time.
+        """
+        self.N = N
+        self.K_revisions = K_revisions
+        self.K_time = K_time or datetime.timedelta(days=90)
+        self.will_truncate = will_truncate
+
         # initialization class constants
         # last revision when a node was visited
         # by the algorithm
@@ -46,24 +69,15 @@ class TriesA5(object):
         self.EDGE_DEST_NODE_ID = 1;
         # tokens which are on an edge
         self.EDGE_TOKENS = 2;
-
+        # Minimum number of days before things are put
+        # into the list subject to time pruning, for efficiency.
         self.MINDAYS = datetime.timedelta(days=5)
 
         # initializing class data members
         self.nodes = {}
         self.edges = {}
-        # N is a constant with propertie that
-        # every string of lenght >= N is rare
-        # N determines depth of the tree
-        self.N = N
         # last inserted node id
         self.lin_id = -1
-        # the tree keeps at least K_revisions revisions
-        # and at least K_time days of revisions
-        # (revisions that are not older than K_time days)
-        self.K_revisions = K_rev
-        self.K_time = K_time or datetime.timedelta(days=90)
-        self.will_truncate = will_truncate
         # timeTable is a mapping revisions <=> timestamps
         self.timetable = []
         # timestamp format is 'yyyymmddhhmmss'
@@ -89,14 +103,6 @@ class TriesA5(object):
         # the table have similar role as timetable
         self.revision_id_table = []
 
-    @classmethod
-    def from_json(cls, json_string):
-        """ alternative constructor for creating an object of class TriesA5
-        from json string which was obtained by method dump2json
-        """
-        result = cls()
-        result.load_from_json(json_string)
-        return result
 
     def add_revision(self, revision, timestamp=None,
                      user_id=None, user_name=None, wiki_revision_id=None):
@@ -577,74 +583,6 @@ class TriesA5(object):
         return int(json_string[1 : idx])
 
 
-    def load_from_json(self, json_string):
-        """ method loads the tree from json string
-        About id of leaf nodes:
-        we are losing ids of leaf nodes while dumping to json
-        because leaf node cannot become internal node during
-        tree construction, then we are assigning negative integers
-        as id to leaf nodes (to prevent fast increasing self.lin_id)
-        """
-        tree_json = self.get_tree_json(json_string)
-        nodes_edges = json.loads(tree_json)
-        #nodes_edges = json.loads(tree_json)
-        # first we extract class_values
-        class_values = nodes_edges['class_values']
-        del(nodes_edges['class_values'])
-        self.N = class_values['N']
-        self.K_revisions = class_values['K_revisions']
-        self.K_time = class_values['K_time']
-        self.cr_timestamp = class_values['cr_timestamp']
-        self.lin_id = class_values['lin_id']
-        self.rev_incremental_number = class_values['rev_incremental_number']
-        # loading timetable and revision_id_table
-        self.timetable = nodes_edges['timetable']
-        self.revision_id_table = nodes_edges['revision_id_table']
-        del(nodes_edges['timetable'])
-        del(nodes_edges['revision_id_table'])
-        # last inserted node id
-        #lin_id = 0
-        # last inserted leaf id
-        lil_id = 0
-        nodes = {}
-        edges = {}
-        for x in nodes_edges:
-            src_node_id = int(x)
-            #lin_id = max(lin_id, src_node_id)
-            line = nodes_edges[x]
-            nodes[src_node_id] = [line[0]]
-            edges[src_node_id] = {}
-            idx = 1
-            while idx < len(line):
-                # in the beginning of each loop idx point
-                # to a string of tokens, so line[idx] is
-                # a string with tokens
-                if not isinstance(line[idx], basestring):
-                    raise Exception('error in parsing json')
-                tokens = line[idx].split()
-                # edge leads to a leaf
-                if ((idx + 2) < len(line) and
-                   not isinstance(line[idx + 2], basestring)):
-                    # updating leaf id
-                    lil_id -= 1
-                    # adding a node
-                    nodes[lil_id] = [line[idx + 1], line[idx + 2]]
-                    # adding an edge
-                    e = [src_node_id, lil_id, tokens]
-                    edges[src_node_id][tokens[0]] = e
-                    idx += 3
-                # edge leads to an internal node
-                else:
-                    # creating an edge
-                    e = [src_node_id, line[idx + 1], tokens]
-                    edges[src_node_id][tokens[0]] = e
-                    idx += 2
-        # at this point we have nodes and edges
-        self.nodes = nodes
-        self.edges = edges
-        self.last_inserted_revision_id = self.get_last_revision_id(json_string)
-        #self.lin_id = lin_id
-
     def dump_covering2json(self):
         """ precondition is self.cr_covering is
         a covering of current revision
@@ -728,16 +666,16 @@ def plot_TriesA5(nodes, edges, revisions, file_name):
 class TestTextAttribution(unittest.TestCase):
 
     def test_one_revision(self):
-        trie = TriesA5(N=4)
-        import datetime
+        trie = TextAttribution()
+        trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
         print "One:", trie.cr_covering
         self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
 
     def test_two_revisions(self):
-        trie = TriesA5(N=4)
-        import datetime
+        trie = TextAttribution()
+        trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         now1 = datetime.datetime(year=2015, month=8, day=26)
         trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
@@ -746,8 +684,8 @@ class TestTextAttribution(unittest.TestCase):
         # self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
 
     def test_three_revisions(self):
-        trie = TriesA5(N=4)
-        import datetime
+        trie = TextAttribution()
+        trie.initialize(N=4)
         now0 = datetime.datetime(year=2015, month=8, day=25)
         now1 = datetime.datetime(year=2015, month=8, day=26)
         now2 = datetime.datetime(year=2015, month=8, day=26)
