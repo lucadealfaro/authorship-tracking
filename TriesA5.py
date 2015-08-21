@@ -1,16 +1,14 @@
 #!/usr/bin/python
 # Michael Shavlovsky, 2012
+# Luca de Alfaro, 2015
+# BSD License.
 
+import datetime
+import json_plus
+import json
 import os
 import numpy as np
-import json
-import cjson
-import glob
-import wiki2text_v2 as w2t
-import re
-import time
-import gzip
-
+import unittest
 
 class TriesA5(object):
     """ class TriesA5 stores all data and methods
@@ -32,7 +30,7 @@ class TriesA5(object):
     So an edge is retreived by its souce node id and first token:
     e = self.edges[source_node_id][first_token]
     """
-    def __init__(self, N=4, K_rev=100, K_time=90, will_truncate=True):
+    def __init__(self, N=4, K_rev=100, K_time=None, will_truncate=True):
         # initialization class constants
         # last revision when a node was visited
         # by the algorithm
@@ -49,6 +47,8 @@ class TriesA5(object):
         # tokens which are on an edge
         self.EDGE_TOKENS = 2;
 
+        self.MINDAYS = datetime.timedelta(days=5)
+
         # initializing class data members
         self.nodes = {}
         self.edges = {}
@@ -62,7 +62,7 @@ class TriesA5(object):
         # and at least K_time days of revisions
         # (revisions that are not older than K_time days)
         self.K_revisions = K_rev
-        self.K_time = K_time
+        self.K_time = K_time or datetime.timedelta(days=90)
         self.will_truncate = will_truncate
         # timeTable is a mapping revisions <=> timestamps
         self.timetable = []
@@ -405,31 +405,28 @@ class TriesA5(object):
         truncating nodes of the tree.
         timetable is a list of tuples
         (revision index number, timestamp)
-        add new elemnts to the end
+        add new elements to the end
         [oldest ----- most recent]
         """
         self.cr_timestamp = timestamp
         if timestamp == None:
             return
         # adding rule: if day distance between
-        # current revsion and previous inserted revision
-        # is more or equal than mindays days then add new tuple
+        # current revision and previous inserted revision
+        # is more or equal than MINDAYS then add new tuple
         # to the time list
-        mindays = 5
         if len(self.timetable) == 0:
             tuple2add = (self.rev_incremental_number, self.cr_timestamp)
             self.timetable.append(tuple2add)
             return
-        if self.time_distance(self.timetable[-1][1],
-                              self.cr_timestamp) >= mindays:
+        if self.cr_timestamp - self.timetable[-1][1] > self.MINDAYS:
             tuple2add = (self.rev_incremental_number, self.cr_timestamp)
             self.timetable.append(tuple2add)
         # deleting rule: delete tuple from the timetable
         # if distance between current revision and tuple is
         # more thatn self.K_time+mindays days
         while True:
-            if self.time_distance(self.timetable[0][1],
-                                  self.cr_timestamp) > self.K_time + mindays:
+            if self.cr_timestamp - self.timetable[0][1] > self.K_time:
                 del self.timetable[0]
             else:
                 break
@@ -506,21 +503,6 @@ class TriesA5(object):
             res += 1
         return res
 
-    def time_distance(self, x1, x2):
-        """ x1 and x2 are timestamps in 'yyyymmddhhmmss' format
-        returns |x2 - x1| in days.
-        """
-        year1 = int(x1[:4])
-        month1 = int(x1[4:6])
-        day1 = int(x1[6:8])
-        year2 = int(x2[:4])
-        month2 = int(x2[4:6])
-        day2 = int(x2[6:8])
-        dist = (365 * (year2 - year1) +
-                30 * (month2 - month1) +
-                day2 - day1)
-        return abs(dist)
-
     def is_leaf(self, node_id):
         return node_id not in self.edges
 
@@ -532,7 +514,7 @@ class TriesA5(object):
         """
         tree_dict = self.get_tree_as_dict()
         res = [self.last_inserted_revision_id, tree_dict]
-        return cjson.encode(res)
+        return json.dumps(res)
 
     def get_tree_as_dict(self):
         """ method returns dictionary which represents the tree and
@@ -594,6 +576,7 @@ class TriesA5(object):
         idx = json_string.find(',')
         return int(json_string[1 : idx])
 
+
     def load_from_json(self, json_string):
         """ method loads the tree from json string
         About id of leaf nodes:
@@ -603,7 +586,7 @@ class TriesA5(object):
         as id to leaf nodes (to prevent fast increasing self.lin_id)
         """
         tree_json = self.get_tree_json(json_string)
-        nodes_edges = cjson.decode(tree_json)
+        nodes_edges = json.loads(tree_json)
         #nodes_edges = json.loads(tree_json)
         # first we extract class_values
         class_values = nodes_edges['class_values']
@@ -666,7 +649,7 @@ class TriesA5(object):
         """ precondition is self.cr_covering is
         a covering of current revision
         """
-        return cjson.encode(self.cr_covering[self.N : -self.N])
+        return json.dumps(self.cr_covering[self.N : -self.N])
 
 
 def plot_TriesA5(nodes, edges, revisions, file_name):
@@ -742,3 +725,40 @@ def plot_TriesA5(nodes, edges, revisions, file_name):
     print temp
     os.system(temp)
 
+class TestTextAttribution(unittest.TestCase):
+
+    def test_one_revision(self):
+        trie = TriesA5(N=4)
+        import datetime
+        now0 = datetime.datetime(year=2015, month=8, day=25)
+        trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
+        print "One:", trie.cr_covering
+        self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
+
+    def test_two_revisions(self):
+        trie = TriesA5(N=4)
+        import datetime
+        now0 = datetime.datetime(year=2015, month=8, day=25)
+        now1 = datetime.datetime(year=2015, month=8, day=26)
+        trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
+        trie.add_revision('I like cats and dogs but even more birds'.split(), user_id=1, timestamp=now1, user_name='luca')
+        print "Two", trie.cr_covering
+        # self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 0])
+
+    def test_three_revisions(self):
+        trie = TriesA5(N=4)
+        import datetime
+        now0 = datetime.datetime(year=2015, month=8, day=25)
+        now1 = datetime.datetime(year=2015, month=8, day=26)
+        now2 = datetime.datetime(year=2015, month=8, day=26)
+        trie.add_revision('I like cats and dogs'.split(), user_id=1, timestamp=now0, user_name='luca')
+        trie.add_revision('I like cats and dogs but even more birds'.split(), user_id=1, timestamp=now1, user_name='luca')
+        trie.add_revision('I like cats and elephants but even more birds'.split(), user_id=1, timestamp=now2, user_name='luca')
+        print "Three:", trie.cr_covering
+        self.assertEqual(trie.cr_covering, [0, 0, 0, 0, 2, 1, 1, 1, 1])
+
+
+
+
+if __name__ == '__main__':
+    unittest.main()
